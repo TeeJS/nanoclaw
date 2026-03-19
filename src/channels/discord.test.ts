@@ -161,9 +161,7 @@ function createMessage(overrides: {
     member: overrides.memberDisplayName
       ? { displayName: overrides.memberDisplayName }
       : null,
-    guild: overrides.guildName
-      ? { name: overrides.guildName }
-      : null,
+    guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? 'general',
       messages: {
@@ -498,7 +496,11 @@ describe('DiscordChannel', () => {
       const attachments = new Map([
         ['att1', { name: 'clip.mp4', contentType: 'video/mp4' }],
       ]);
-      const msg = createMessage({ content: '', attachments, guildName: 'Server' });
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -515,7 +517,11 @@ describe('DiscordChannel', () => {
       const attachments = new Map([
         ['att1', { name: 'voice.ogg', contentType: 'audio/ogg' }],
       ]);
-      const msg = createMessage({ content: '', attachments, guildName: 'Server' });
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -532,7 +538,11 @@ describe('DiscordChannel', () => {
       const attachments = new Map([
         ['att1', { name: 'report.pdf', contentType: 'application/pdf' }],
       ]);
-      const msg = createMessage({ content: '', attachments, guildName: 'Server' });
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -550,7 +560,11 @@ describe('DiscordChannel', () => {
         ['att1', { name: 'a.png', contentType: 'image/png' }],
         ['att2', { name: 'b.txt', contentType: 'text/plain' }],
       ]);
-      const msg = createMessage({ content: '', attachments, guildName: 'Server' });
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
@@ -596,7 +610,9 @@ describe('DiscordChannel', () => {
 
       await channel.sendMessage('dc:1234567890123456', 'Hello');
 
-      expect(currentClient().channels.fetch).toHaveBeenCalledWith('1234567890123456');
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith(
+        '1234567890123456',
+      );
     });
 
     it('strips dc: prefix from JID', async () => {
