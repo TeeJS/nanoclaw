@@ -116,11 +116,6 @@ export async function run(_args: string[]): Promise<void> {
 
   const channelAuth: Record<string, string> = {};
 
-  // WhatsApp: check for auth credentials on disk
-  const authDir = path.join(projectRoot, 'store', 'auth');
-  if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
-    channelAuth.whatsapp = 'authenticated';
-  }
 
   // Token-based channels: check .env
   if (process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN) {

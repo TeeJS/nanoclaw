@@ -24,7 +24,19 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages
+RUN pip3 install --break-system-packages \
+    requests \
+    beautifulsoup4 \
+    googlemaps \
+    google-auth \
+    google-auth-oauthlib \
+    google-api-python-client
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
