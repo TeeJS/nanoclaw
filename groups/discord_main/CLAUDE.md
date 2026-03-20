@@ -26,7 +26,11 @@ Python packages available: requests, beautifulsoup4, googlemaps, google-auth, go
 
 Config: `/workspace/group/ha_config.json` — contains `url` and `token`.
 
-**IMPORTANT: Always search for the exact entity_id first before triggering anything. Never guess entity IDs.**
+**Keyword routing:**
+- **"activate [name]"** → trigger a HA automation or script via the REST API
+- **"run [name]"** → execute a local script or command directly (bash/python), do NOT call HA
+
+**IMPORTANT: Always search for the exact entity_id first before triggering anything via HA. Never guess entity IDs.**
 
 Use the HA REST API to control devices and trigger automations:
 
