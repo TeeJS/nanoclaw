@@ -64,7 +64,8 @@ function buildVolumeMounts(
   const projectRoot = process.cwd();
   // workspaceFolder lets a group share another group's workspace (CLAUDE.md, files)
   // while keeping its own isolated IPC/session dirs.
-  const workspaceFolder = group.containerConfig?.workspaceFolder || group.folder;
+  const workspaceFolder =
+    group.containerConfig?.workspaceFolder || group.folder;
   const groupDir = resolveGroupFolderPath(workspaceFolder);
 
   if (isMain) {

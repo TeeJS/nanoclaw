@@ -221,7 +221,10 @@ export class DiscordChannel implements Channel {
         is_from_me: true,
       });
 
-      logger.info({ chatJid, sender: senderName }, 'Discord /compact interaction routed');
+      logger.info(
+        { chatJid, sender: senderName },
+        'Discord /compact interaction routed',
+      );
     });
 
     return new Promise<void>((resolve) => {
@@ -248,9 +251,15 @@ export class DiscordChannel implements Channel {
               Routes.applicationGuildCommands(readyClient.user.id, guild.id),
               { body: [compactCmd] },
             );
-            logger.info({ guildId: guild.id }, 'Registered /compact slash command');
+            logger.info(
+              { guildId: guild.id },
+              'Registered /compact slash command',
+            );
           } catch (err) {
-            logger.warn({ guildId: guild.id, err }, 'Failed to register /compact slash command');
+            logger.warn(
+              { guildId: guild.id, err },
+              'Failed to register /compact slash command',
+            );
           }
         }
 

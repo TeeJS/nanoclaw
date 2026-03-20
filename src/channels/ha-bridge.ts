@@ -213,7 +213,10 @@ export class HaBridgeChannel implements Channel {
       false,
     );
 
-    logger.info({ jid: HA_JID, folder: HA_GROUP_FOLDER }, 'HA Bridge: group registered');
+    logger.info(
+      { jid: HA_JID, folder: HA_GROUP_FOLDER },
+      'HA Bridge: group registered',
+    );
   }
 
   // ── HTTP request handling ──────────────────────────────────────────────────
@@ -225,7 +228,10 @@ export class HaBridgeChannel implements Channel {
     const url = req.url?.split('?')[0] || '/';
     const method = (req.method || 'GET').toUpperCase();
 
-    logger.info({ method, url, ip: req.socket.remoteAddress }, 'HA Bridge: request');
+    logger.info(
+      { method, url, ip: req.socket.remoteAddress },
+      'HA Bridge: request',
+    );
 
     // Health check
     if (method === 'GET' && (url === '/health' || url === '/')) {
@@ -242,7 +248,9 @@ export class HaBridgeChannel implements Channel {
     if (method === 'GET' && url === '/v1/models') {
       this.sendJson(res, 200, {
         object: 'list',
-        data: [{ id: 'nanoclaw', object: 'model', created: 0, owned_by: 'nanoclaw' }],
+        data: [
+          { id: 'nanoclaw', object: 'model', created: 0, owned_by: 'nanoclaw' },
+        ],
       });
       return;
     }
@@ -342,7 +350,11 @@ export class HaBridgeChannel implements Channel {
       const msgs = body.messages as Array<{ role: string; content: unknown }>;
       for (let i = msgs.length - 1; i >= 0; i--) {
         const m = msgs[i];
-        if (m.role === 'user' && typeof m.content === 'string' && m.content.trim()) {
+        if (
+          m.role === 'user' &&
+          typeof m.content === 'string' &&
+          m.content.trim()
+        ) {
           return m.content.trim();
         }
       }
@@ -359,7 +371,11 @@ export class HaBridgeChannel implements Channel {
     responseText: string,
   ): Record<string, unknown> {
     // OpenAI chat completions format
-    if (url === '/v1/chat/completions' || url === '/chat/completions' || Array.isArray(requestBody.messages)) {
+    if (
+      url === '/v1/chat/completions' ||
+      url === '/chat/completions' ||
+      Array.isArray(requestBody.messages)
+    ) {
       return {
         id: `chatcmpl-${randomUUID()}`,
         object: 'chat.completion',
@@ -404,7 +420,9 @@ export class HaBridgeChannel implements Channel {
     return new Promise<string>((resolve, reject) => {
       // Safety: clear any leftover pending response from a previous timed-out request
       if (this.pendingResponse) {
-        logger.warn('HA Bridge: clearing stale pendingResponse before new query');
+        logger.warn(
+          'HA Bridge: clearing stale pendingResponse before new query',
+        );
         clearTimeout(this.pendingResponse.maxTimer);
         if (this.pendingResponse.debounceTimer) {
           clearTimeout(this.pendingResponse.debounceTimer);
