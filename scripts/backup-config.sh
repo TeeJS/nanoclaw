@@ -21,11 +21,12 @@ if [ -f "$NANOCLAW_DIR/.env" ]; then
   cp "$NANOCLAW_DIR/.env" "$DEST/.env"
 fi
 
-# Group credentials (ha_config.json etc — never goes to git)
-find "$NANOCLAW_DIR/groups" -name "ha_config.json" | while read -r f; do
+# All group files: CLAUDE.md, *.json, *.py, *.md
+find "$NANOCLAW_DIR/groups" -maxdepth 2 \( -name "*.md" -o -name "*.MD" -o -name "*.json" -o -name "*.py" \) \
+  ! -path "*/logs/*" | while read -r f; do
   group=$(basename "$(dirname "$f")")
   mkdir -p "$DEST/groups/$group"
-  cp "$f" "$DEST/groups/$group/ha_config.json"
+  cp "$f" "$DEST/groups/$group/"
 done
 
 # System config
