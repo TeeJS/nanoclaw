@@ -21,12 +21,12 @@ if [ -f "$NANOCLAW_DIR/.env" ]; then
   cp "$NANOCLAW_DIR/.env" "$DEST/.env"
 fi
 
-# All group files: CLAUDE.md, *.json, *.py, *.md
-find "$NANOCLAW_DIR/groups" -maxdepth 2 \( -name "*.md" -o -name "*.MD" -o -name "*.json" -o -name "*.py" \) \
+# All group files: *.md, *.json, *.py (including conversations/, excluding logs/)
+find "$NANOCLAW_DIR/groups" \( -name "*.md" -o -name "*.MD" -o -name "*.json" -o -name "*.py" \) \
   ! -path "*/logs/*" | while read -r f; do
-  group=$(basename "$(dirname "$f")")
-  mkdir -p "$DEST/groups/$group"
-  cp "$f" "$DEST/groups/$group/"
+  rel="${f#$NANOCLAW_DIR/groups/}"
+  mkdir -p "$DEST/groups/$(dirname "$rel")"
+  cp "$f" "$DEST/groups/$rel"
 done
 
 # System config
