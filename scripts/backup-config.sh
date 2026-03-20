@@ -5,7 +5,7 @@
 set -euo pipefail
 
 NANOCLAW_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BACKUP_DIR="/mnt/nas/backups/nanoclaw"
+BACKUP_DIR="/mnt/nas-archives/nanoclaw_backups"
 DATE=$(date +%Y-%m-%d)
 DEST="$BACKUP_DIR/$DATE"
 
