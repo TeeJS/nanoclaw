@@ -4,6 +4,9 @@
 // discord
 import './discord.js';
 
+// ha-bridge
+import './ha-bridge.js';
+
 // gmail
 
 // slack

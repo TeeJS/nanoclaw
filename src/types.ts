@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  workspaceFolder?: string; // Override the group folder used for the workspace mount
 }
 
 export interface RegisteredGroup {

@@ -62,7 +62,10 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
-  const groupDir = resolveGroupFolderPath(group.folder);
+  // workspaceFolder lets a group share another group's workspace (CLAUDE.md, files)
+  // while keeping its own isolated IPC/session dirs.
+  const workspaceFolder = group.containerConfig?.workspaceFolder || group.folder;
+  const groupDir = resolveGroupFolderPath(workspaceFolder);
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs

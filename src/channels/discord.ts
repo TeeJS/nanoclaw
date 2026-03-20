@@ -3,6 +3,9 @@ import {
   Events,
   GatewayIntentBits,
   Message,
+  REST,
+  Routes,
+  SlashCommandBuilder,
   TextChannel,
 } from 'discord.js';
 
@@ -180,8 +183,49 @@ export class DiscordChannel implements Channel {
       logger.error({ err: err.message }, 'Discord client error');
     });
 
+    // Handle /compact slash command interactions
+    this.client.on(Events.InteractionCreate, async (interaction) => {
+      if (!interaction.isChatInputCommand()) return;
+      if (interaction.commandName !== 'compact') return;
+
+      const channelId = interaction.channelId;
+      const chatJid = `dc:${channelId}`;
+      const group = this.opts.registeredGroups()[chatJid];
+
+      if (!group) {
+        await interaction.reply({
+          content: 'This channel is not registered with Nanoclaw.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Acknowledge immediately to avoid the "did not respond" error
+      await interaction.reply({ content: '⏳ Compacting...', ephemeral: true });
+
+      const timestamp = new Date().toISOString();
+      const senderName =
+        interaction.member?.user?.username || interaction.user.username;
+      const sender = interaction.user.id;
+      const msgId = interaction.id;
+
+      // Route as a plain /compact message through the normal pipeline.
+      // Mark as is_from_me so isSessionCommandAllowed passes regardless of channel.
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender,
+        sender_name: senderName,
+        content: '/compact',
+        timestamp,
+        is_from_me: true,
+      });
+
+      logger.info({ chatJid, sender: senderName }, 'Discord /compact interaction routed');
+    });
+
     return new Promise<void>((resolve) => {
-      this.client!.once(Events.ClientReady, (readyClient) => {
+      this.client!.once(Events.ClientReady, async (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
           'Discord bot connected',
@@ -190,6 +234,26 @@ export class DiscordChannel implements Channel {
         console.log(
           `  Use /chatid command or check channel IDs in Discord settings\n`,
         );
+
+        // Register /compact slash command for all guilds the bot is in
+        const rest = new REST().setToken(this.botToken);
+        const compactCmd = new SlashCommandBuilder()
+          .setName('compact')
+          .setDescription('Compact the conversation context to free up memory')
+          .toJSON();
+
+        for (const guild of readyClient.guilds.cache.values()) {
+          try {
+            await rest.put(
+              Routes.applicationGuildCommands(readyClient.user.id, guild.id),
+              { body: [compactCmd] },
+            );
+            logger.info({ guildId: guild.id }, 'Registered /compact slash command');
+          } catch (err) {
+            logger.warn({ guildId: guild.id, err }, 'Failed to register /compact slash command');
+          }
+        }
+
         resolve();
       });
 
