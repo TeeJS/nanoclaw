@@ -9,14 +9,17 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups - track CLAUDE.md and scripts, never credentials
 groups/*
-!groups/main/
-!groups/global/
-groups/main/*
-groups/global/*
-!groups/main/CLAUDE.md
-!groups/global/CLAUDE.md
+!groups/*/
+groups/*/*
+!groups/*/CLAUDE.md
+!groups/discord_main/monitor_backups.py
+!groups/ha_monitor/ignore_list.json
+
+# Explicitly block group credentials
+groups/*/ha_config.json
+groups/*/*.keys.json
 
 # Secrets
 *.keys.json

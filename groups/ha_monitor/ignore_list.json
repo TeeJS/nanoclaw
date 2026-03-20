@@ -1,0 +1,62 @@
+[
+  {
+    "pattern": "sonos",
+    "reason": "Sonos/Cast Speaker reconnect noise \u2014 TeeJ requested ignore for rest of month",
+    "expires": "2026-03-31T23:59:59"
+  },
+  {
+    "pattern": "cast",
+    "reason": "Sonos/Cast Speaker reconnect noise \u2014 TeeJ requested ignore for rest of month",
+    "expires": "2026-03-31T23:59:59"
+  },
+  {
+    "pattern": "androidtv|android_tv",
+    "reason": "AndroidTV \u2014 TeeJ requested ignore until end of month",
+    "expires": "2026-03-31T23:59:59"
+  },
+  {
+    "pattern": "firmware issues with light transitions",
+    "reason": "Matter \u2014 4 TP-Link dimmer switch light endpoints with known firmware bug, harmless",
+    "expires": "2026-03-31T23:59:59"
+  },
+  {
+    "pattern": "google_assistant",
+    "reason": "Google Assistant slow sync at startup \u2014 working fine, TeeJ requested permanent ignore",
+    "expires": null
+  },
+  {
+    "pattern": "google_config",
+    "reason": "Google Cloud stream errors \u2014 TeeJ requested ignore until end of month",
+    "expires": "2026-03-31T23:59:59"
+  },
+  {
+    "pattern": "bambu_lab",
+    "reason": "bambu_lab blocking scandir in async loop \u2014 known upstream bug, TeeJ requested 60 day ignore",
+    "expires": "2026-05-08T23:59:59"
+  },
+  {
+    "pattern": "livingroom-desk-voice",
+    "reason": "Living room desk voice ESPHome device — TeeJ requested ignore until end of month",
+    "expires": "2026-03-31T23:59:59"
+  },
+  {
+    "pattern": "livingroom-desk-tcs34725",
+    "reason": "Color sensor ESPHome device dropping — TeeJ requested ignore until end of month",
+    "expires": "2026-03-31T23:59:59"
+  },
+  {
+    "pattern": "pyrate_limiter",
+    "reason": "O365/MS365 Teams rate limiter async warning \u2014 cosmetic, known upstream issue, permanent ignore",
+    "expires": null
+  },
+  {
+    "pattern": "pixel_8_pro.*not strictly increasing",
+    "reason": "Pixel 8 Pro fitness sensors (steps, calories, distance) occasionally recalibrate downward — expected behavior, permanent ignore",
+    "expires": null
+  },
+  {
+    "pattern": "livingroom-desk-display.*(offline|can't connect|cannot connect)",
+    "reason": "Living room desk display ESPHome offline/connection messages — permanent ignore, other errors still reported",
+    "expires": null
+  }
+]
