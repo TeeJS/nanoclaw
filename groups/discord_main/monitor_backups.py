@@ -230,7 +230,7 @@ def check_unraid_user_scripts(alert_mode=False):
     return summary_lines, script_failures
 
 
-CONFIG_BACKUP_DIR = "/workspace/extra/nas/backups/nanoclaw_backups"
+CONFIG_BACKUP_DIR = "/workspace/extra/nas-archives/nanoclaw_backups"
 
 
 def check_config_backup():
