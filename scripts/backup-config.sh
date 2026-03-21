@@ -6,11 +6,6 @@ set -euo pipefail
 
 NANOCLAW_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKUP_DIR="/mnt/nas-archives/nanoclaw_backups"
-
-# Inside containers the host path isn't visible — use the container mount path
-if [ ! -d "/mnt/nas-archives" ] && [ -d "/workspace/extra/nas-archives" ]; then
-  BACKUP_DIR="/workspace/extra/nas-archives/nanoclaw_backups"
-fi
 DATE=$(date +%Y-%m-%d)
 DEST="$BACKUP_DIR/$DATE"
 
