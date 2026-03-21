@@ -38,3 +38,10 @@ find "$BACKUP_DIR" -maxdepth 1 -type d -name "20*" -mtime +30 -exec rm -rf {} + 
 
 echo "Backup complete: $DEST"
 ls "$DEST"
+
+# Write status file so the agent can monitor without NAS access
+STATUS_FILE="$NANOCLAW_DIR/groups/discord_main/backup_status.json"
+FILE_COUNT=$(ls "$DEST" | wc -l | tr -d ' ')
+cat > "$STATUS_FILE" <<JSON
+{"status":"success","date":"$DATE","dest":"$DEST","files":$FILE_COUNT,"timestamp":"$(date -Iseconds)"}
+JSON

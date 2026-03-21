@@ -230,29 +230,37 @@ def check_unraid_user_scripts(alert_mode=False):
     return summary_lines, script_failures
 
 
-CONFIG_BACKUP_DIR = "/workspace/extra/nas-archives/nanoclaw_backups"
+
 
 
 def check_config_backup():
     """
     Check whether today's nanoclaw config backup ran successfully.
+    Reads backup_status.json written by the host cron job.
     Returns (summary_lines, failures).
     """
-    import os
+    import os, json
     now = datetime.now(timezone.utc) - timedelta(hours=7)  # MST
     today = now.strftime("%Y-%m-%d")
-    backup_path = os.path.join(CONFIG_BACKUP_DIR, today)
+    status_file = "/workspace/group/backup_status.json"
 
-    if not os.path.isdir(backup_path):
-        line = f"❌ **Nanoclaw Config Backup** — no backup found for {today}"
-        return [line], [{"name": "Nanoclaw Config Backup", "error": f"No backup directory found at {backup_path}"}]
+    if not os.path.exists(status_file):
+        line = f"❌ **Nanoclaw Config Backup** — no status file found (backup may not have run yet)"
+        return [line], [{"name": "Nanoclaw Config Backup", "error": "backup_status.json not found"}]
 
-    files = os.listdir(backup_path)
-    if not files:
-        line = f"❌ **Nanoclaw Config Backup** — backup folder exists but is empty ({today})"
-        return [line], [{"name": "Nanoclaw Config Backup", "error": "Backup folder is empty"}]
+    with open(status_file) as f:
+        status = json.load(f)
 
-    line = f"✅ **Nanoclaw Config Backup** — {len(files)} file(s) backed up ({today})"
+    if status.get("status") != "success":
+        err = status.get("error", "unknown error")
+        line = f"❌ **Nanoclaw Config Backup** — failed: {err}"
+        return [line], [{"name": "Nanoclaw Config Backup", "error": err}]
+
+    if status.get("date") != today:
+        line = f"❌ **Nanoclaw Config Backup** — last backup was {status.get('date')} (not today)"
+        return [line], [{"name": "Nanoclaw Config Backup", "error": f"Last backup date {status.get('date')} != {today}"}]
+
+    line = f"✅ **Nanoclaw Config Backup** — {status.get('files')} file(s) backed up ({today})"
     return [line], []
 
 
