@@ -195,6 +195,8 @@ export class HaBridgeChannel implements Channel {
         workspaceFolder,
         // Mirror the main group's additional mounts (e.g. NAS)
         additionalMounts: mainGroup?.containerConfig?.additionalMounts ?? [],
+        keepWarm: true,
+        timeout: 6 * 60 * 60 * 1000, // 6 hours
       },
     };
 

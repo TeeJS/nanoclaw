@@ -31,6 +31,7 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   workspaceFolder?: string; // Override the group folder used for the workspace mount
+  keepWarm?: boolean; // Keep container alive between requests (no idle timeout)
 }
 
 export interface RegisteredGroup {
