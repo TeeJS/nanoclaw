@@ -30,7 +30,7 @@ const HA_GROUP_FOLDER = 'ha_bridge';
 const HA_GROUP_NAME = 'Home Assistant Voice Bridge';
 
 /** Milliseconds of silence after the last agent chunk before we resolve. */
-const DEBOUNCE_MS = 3000;
+const DEBOUNCE_MS = 800;
 
 /** Absolute maximum wait time for a single query (60 s). */
 const MAX_WAIT_MS = 60_000;
