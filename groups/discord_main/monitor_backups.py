@@ -230,6 +230,32 @@ def check_unraid_user_scripts(alert_mode=False):
     return summary_lines, script_failures
 
 
+CONFIG_BACKUP_DIR = "/workspace/extra/nas/backups/nanoclaw_backups"
+
+
+def check_config_backup():
+    """
+    Check whether today's nanoclaw config backup ran successfully.
+    Returns (summary_lines, failures).
+    """
+    import os
+    now = datetime.now(timezone.utc) - timedelta(hours=7)  # MST
+    today = now.strftime("%Y-%m-%d")
+    backup_path = os.path.join(CONFIG_BACKUP_DIR, today)
+
+    if not os.path.isdir(backup_path):
+        line = f"❌ **Nanoclaw Config Backup** — no backup found for {today}"
+        return [line], [{"name": "Nanoclaw Config Backup", "error": f"No backup directory found at {backup_path}"}]
+
+    files = os.listdir(backup_path)
+    if not files:
+        line = f"❌ **Nanoclaw Config Backup** — backup folder exists but is empty ({today})"
+        return [line], [{"name": "Nanoclaw Config Backup", "error": "Backup folder is empty"}]
+
+    line = f"✅ **Nanoclaw Config Backup** — {len(files)} file(s) backed up ({today})"
+    return [line], []
+
+
 def build_daily_report():
     """Build the full 7:30 AM daily status report."""
     now = datetime.now(timezone.utc)
@@ -247,7 +273,12 @@ def build_daily_report():
     script_summary, script_failures = check_unraid_user_scripts()
     lines.extend(script_summary)
 
-    total_failures = len(dup_failures) + len(script_failures)
+    lines.append("")
+    lines.append("**Nanoclaw Config Backup:**")
+    cfg_summary, cfg_failures = check_config_backup()
+    lines.extend(cfg_summary)
+
+    total_failures = len(dup_failures) + len(script_failures) + len(cfg_failures)
     lines.append("")
     if total_failures == 0:
         lines.append("🎉 All systems nominal!")

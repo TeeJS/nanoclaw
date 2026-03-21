@@ -58,5 +58,10 @@
     "pattern": "livingroom-desk-display.*(offline|can't connect|cannot connect)",
     "reason": "Living room desk display ESPHome offline/connection messages — permanent ignore, other errors still reported",
     "expires": null
+  },
+  {
+    "pattern": "unclean restart",
+    "reason": "Unclean restart messages — TeeJ requested permanent ignore",
+    "expires": null
   }
 ]

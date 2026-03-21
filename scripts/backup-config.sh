@@ -6,6 +6,11 @@ set -euo pipefail
 
 NANOCLAW_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BACKUP_DIR="/mnt/nas-archives/nanoclaw_backups"
+
+# Inside containers, nas-archives isn't mounted — fall back to the nas share
+if [ ! -d "/mnt/nas-archives" ] && [ -d "/mnt/nas" ]; then
+  BACKUP_DIR="/mnt/nas/backups/nanoclaw_backups"
+fi
 DATE=$(date +%Y-%m-%d)
 DEST="$BACKUP_DIR/$DATE"
 
