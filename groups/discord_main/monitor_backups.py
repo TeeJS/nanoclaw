@@ -158,7 +158,13 @@ def check_duplicati(alert_mode=False):
         last_error_msg = meta.get("LastErrorMessage", "")
 
         # Determine status
-        if last_error_date and last_error_date > cutoff:
+        # Only flag as error if the error is newer than the last successful backup
+        last_run_failed = (
+            last_error_date
+            and last_error_date > cutoff
+            and (not last_finished or last_error_date > last_finished)
+        )
+        if last_run_failed:
             status_icon = "❌"
             failure = {
                 "name": name,
@@ -176,8 +182,9 @@ def check_duplicati(alert_mode=False):
 
         finished_str = last_finished.strftime("%m/%d %H:%M UTC") if last_finished else "never"
         summary_lines.append(f"{status_icon} **{name}** — last run: {finished_str}")
-        if last_error_date and last_error_date > cutoff:
-            summary_lines.append(f"   ↳ Error: {last_error_msg[:120]}")
+        if status_icon == "❌" and last_error_msg:
+            error_date_str = last_error_date.strftime("%m/%d") if last_error_date else "unknown date"
+            summary_lines.append(f"   ↳ Last error ({error_date_str}): {last_error_msg[:150]}")
 
     return summary_lines, failures
 
@@ -264,6 +271,42 @@ def check_config_backup():
     return [line], []
 
 
+def check_rerun_log():
+    """
+    Read the 3AM backup rerun log and return summary lines.
+    Returns (summary_lines, reruns) where reruns is a list of dicts.
+    """
+    import os
+    rerun_file = "/workspace/group/backup_rerun_log.json"
+    if not os.path.exists(rerun_file):
+        return [], []
+
+    try:
+        with open(rerun_file) as f:
+            data = json.load(f)
+    except Exception:
+        return [], []
+
+    now = datetime.now(timezone.utc)
+    mst = now - timedelta(hours=7)
+    today = mst.strftime("%Y-%m-%d")
+
+    # Only include if the log is from today
+    if data.get("date") != today:
+        return [], []
+
+    reruns = data.get("reruns", [])
+    if not reruns:
+        return [], []
+
+    lines = []
+    for r in reruns:
+        status = "re-triggered successfully" if r.get("success") else "re-trigger attempted"
+        lines.append(f"↩️ **{r['name']}** — {r.get('reason', 'missed run')}; {status}")
+
+    return lines, reruns
+
+
 def build_daily_report():
     """Build the full 7:30 AM daily status report."""
     now = datetime.now(timezone.utc)
@@ -275,6 +318,13 @@ def build_daily_report():
     lines.append("**Duplicati Backups:**")
     dup_summary, dup_failures = check_duplicati()
     lines.extend(dup_summary)
+
+    # Include any 3AM auto-reruns
+    rerun_summary, reruns = check_rerun_log()
+    if rerun_summary:
+        lines.append("")
+        lines.append("**3AM Auto-Reruns:**")
+        lines.extend(rerun_summary)
 
     lines.append("")
     lines.append("**Unraid User Scripts:**")

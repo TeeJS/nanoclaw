@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     libdrm2 \
     libxshmfence1 \
     curl \
+    ffmpeg \
     git \
     python3 \
     python3-pip \
@@ -36,7 +37,8 @@ RUN pip3 install --break-system-packages \
     googlemaps \
     google-auth \
     google-auth-oauthlib \
-    google-api-python-client
+    google-api-python-client \
+    wyoming
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

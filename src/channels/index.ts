@@ -7,6 +7,9 @@ import './discord.js';
 // ha-bridge
 import './ha-bridge.js';
 
+// meetings-watcher
+import './meetings-watcher.js';
+
 // gmail
 
 // slack

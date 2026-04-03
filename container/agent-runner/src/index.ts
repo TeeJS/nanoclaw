@@ -56,7 +56,19 @@ interface SDKUserMessage {
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_MESSAGES_DIR = '/workspace/ipc/messages';
 const IPC_POLL_MS = 500;
+
+function writeToolUsageIpc(chatJid: string, groupFolder: string, toolName: string): void {
+  try {
+    fs.mkdirSync(IPC_MESSAGES_DIR, { recursive: true });
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    const data = JSON.stringify({ type: 'tool_usage', chatJid, groupFolder, toolName, timestamp: new Date().toISOString() });
+    const tmp = path.join(IPC_MESSAGES_DIR, `${filename}.tmp`);
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, path.join(IPC_MESSAGES_DIR, filename));
+  } catch { /* non-fatal */ }
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -323,6 +335,62 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+const TOOL_PROFILES: Record<string, string[]> = {
+  general:  ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task', 'TaskOutput', 'TaskStop', 'TeamCreate', 'TeamDelete', 'SendMessage', 'TodoWrite', 'ToolSearch', 'Skill', 'NotebookEdit', 'mcp__nanoclaw__*'],
+  calendar: ['Bash', 'mcp__gcal__*', 'mcp__nanoclaw__*'],
+  music:    ['Bash', 'mcp__music__*', 'mcp__plex__*', 'mcp__nanoclaw__*'],
+  kanban:   ['Bash', 'mcp__kanban__*', 'mcp__nanoclaw__*'],
+  multi:    ['Bash', 'Read', 'Write', 'mcp__gcal__*', 'mcp__music__*', 'mcp__plex__*', 'mcp__kanban__*', 'mcp__nanoclaw__*'],
+};
+
+const FULL_TOOL_LIST = [
+  'Bash',
+  'Read', 'Write', 'Edit', 'Glob', 'Grep',
+  'WebSearch', 'WebFetch',
+  'Task', 'TaskOutput', 'TaskStop',
+  'TeamCreate', 'TeamDelete', 'SendMessage',
+  'TodoWrite', 'ToolSearch', 'Skill',
+  'NotebookEdit',
+  'mcp__nanoclaw__*',
+  'mcp__kanban__*',
+  'mcp__gcal__*',
+  'mcp__freshservice__*',
+  'mcp__music__*',
+  'mcp__plex__*',
+];
+
+const CLASSIFY_SYSTEM = `Classify the user message into one category:
+- general: chit-chat, questions, time/date, math, explanations, code help, web searches
+- calendar: schedule, events, meetings, appointments, reminders
+- music: play music, playback control, what's playing, volume
+- kanban: tasks, tickets, work items, to-do lists
+- multi: involves two or more of the above categories
+Respond with ONLY the category name, nothing else.`;
+
+async function classifyPrompt(prompt: string, credentialProxyUrl: string): Promise<string> {
+  try {
+    const res = await fetch(`${credentialProxyUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': 'placeholder',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 10,
+        system: CLASSIFY_SYSTEM,
+        messages: [{ role: 'user', content: prompt.slice(0, 500) }],
+      }),
+    });
+    const data = await res.json() as { content?: Array<{ text?: string }> };
+    const category = data.content?.[0]?.text?.trim().toLowerCase() ?? 'general';
+    return TOOL_PROFILES[category] ? category : 'general';
+  } catch {
+    return 'general';
+  }
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -389,6 +457,25 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Dynamic tool selection: classify the prompt via Claude Haiku and select only relevant tools.
+  // Falls back to the full tool list if CREDENTIAL_PROXY_URL is not set or classification fails.
+  // GROUP_LOCAL_TOOLS overrides classification entirely — used for local model groups.
+  const credentialProxyUrl = process.env.CREDENTIAL_PROXY_URL;
+  const groupLocalTools = process.env.GROUP_LOCAL_TOOLS
+    ? process.env.GROUP_LOCAL_TOOLS.split(',').map((s) => s.trim()).filter(Boolean)
+    : undefined;
+  let allowedTools: string[];
+  if (groupLocalTools) {
+    log(`Using group tool override: ${groupLocalTools.join(', ')}`);
+    allowedTools = groupLocalTools;
+  } else if (credentialProxyUrl && !containerInput.isScheduledTask) {
+    const category = await classifyPrompt(prompt, credentialProxyUrl);
+    log(`Query classified as: ${category}`);
+    allowedTools = TOOL_PROFILES[category];
+  } else {
+    allowedTools = FULL_TOOL_LIST;
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -399,16 +486,7 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*'
-      ],
+      allowedTools,
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -423,6 +501,31 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        kanban: {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'kanban-mcp-stdio.js')],
+          env: {
+            KANBAN_URL: process.env.KANBAN_URL ?? 'https://kanbantool.schmitzplex.com',
+            KANBAN_API_KEY: process.env.KANBAN_API_KEY ?? '',
+          },
+        },
+        gcal: {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'gcal-mcp-stdio.js')],
+          env: {},
+        },
+        freshservice: {
+          type: 'http' as const,
+          url: 'http://192.168.1.25:8089/mcp',
+        },
+        music: {
+          type: 'http' as const,
+          url: 'http://192.168.1.25:8005/mcp',
+        },
+        plex: {
+          type: 'http' as const,
+          url: 'http://192.168.1.25:3001/mcp',
+        },
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -433,8 +536,22 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+    if (message.type === 'assistant') {
+      if ('uuid' in message) lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Log tool calls via IPC so the host can write to the tool usage log
+      const rawMsg = message as Record<string, unknown>;
+      log(`[tool-debug] keys: ${Object.keys(rawMsg).join(',')}`);
+      const inner = rawMsg.message as Record<string, unknown> | undefined;
+      const content = inner?.content ?? rawMsg.content;
+      log(`[tool-debug] content isArray: ${Array.isArray(content)}, len: ${Array.isArray(content) ? (content as unknown[]).length : 'n/a'}`);
+      if (Array.isArray(content)) {
+        for (const block of content as Array<{ type: string; name?: string }>) {
+          log(`[tool-debug] block: ${block.type}${block.name ? ' name='+block.name : ''}`);
+          if (block.type === 'tool_use' && block.name) {
+            writeToolUsageIpc(containerInput.chatJid, containerInput.groupFolder, block.name);
+          }
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

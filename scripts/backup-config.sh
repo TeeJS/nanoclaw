@@ -29,12 +29,45 @@ find "$NANOCLAW_DIR/groups" \( -name "*.md" -o -name "*.MD" -o -name "*.json" -o
   cp "$f" "$DEST/groups/$rel"
 done
 
+# Source files (host orchestrator, agent runner, setup scripts)
+for dir in src container setup; do
+  if [ -d "$NANOCLAW_DIR/$dir" ]; then
+    find "$NANOCLAW_DIR/$dir" \( -name "*.ts" -o -name "*.js" -o -name "*.sh" -o -name "*.py" -o -name "Dockerfile*" \) \
+      ! -path "*/node_modules/*" | while read -r f; do
+      rel="${f#$NANOCLAW_DIR/}"
+      mkdir -p "$DEST/$(dirname "$rel")"
+      cp "$f" "$DEST/$rel"
+    done
+  fi
+done
+
 # System config
 cp ~/.config/nanoclaw/mount-allowlist.json "$DEST/mount-allowlist.json" 2>/dev/null || true
 cp ~/.config/systemd/user/nanoclaw.service "$DEST/nanoclaw.service" 2>/dev/null || true
 
-# Clean up backups older than 30 days
+# Session history (.jsonl files)
+if [ -d "$NANOCLAW_DIR/data/sessions" ]; then
+  find "$NANOCLAW_DIR/data/sessions" -name "*.jsonl" | while read -r f; do
+    rel="${f#$NANOCLAW_DIR/}"
+    mkdir -p "$DEST/$(dirname "$rel")"
+    cp "$f" "$DEST/$rel"
+  done
+fi
+
+# Clean up daily backups older than 30 days
 find "$BACKUP_DIR" -maxdepth 1 -type d -name "20*" -mtime +30 -exec rm -rf {} + 2>/dev/null || true
+
+# Monthly snapshot: keep the 1st successful backup of each month for 24 months
+MONTH=$(date +%Y-%m)
+MONTHLY_DIR="$BACKUP_DIR/monthly"
+mkdir -p "$MONTHLY_DIR"
+if [ ! -d "$MONTHLY_DIR/$MONTH" ]; then
+  cp -r "$DEST" "$MONTHLY_DIR/$MONTH"
+  echo "Monthly snapshot saved: $MONTHLY_DIR/$MONTH"
+fi
+
+# Clean up monthly snapshots older than 24 months
+find "$MONTHLY_DIR" -maxdepth 1 -type d -name "20*" | sort | head -n -24 | xargs -r rm -rf
 
 echo "Backup complete: $DEST"
 ls "$DEST"

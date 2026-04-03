@@ -11,11 +11,13 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
+  LOCAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -217,6 +219,7 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(
+  group: RegisteredGroup,
   mounts: VolumeMount[],
   containerName: string,
 ): string[] {
@@ -225,21 +228,47 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  // Pass Kanban API key if configured
+  const { KANBAN_API_KEY } = readEnvFile(['KANBAN_API_KEY']);
+  if (KANBAN_API_KEY) args.push('-e', `KANBAN_API_KEY=${KANBAN_API_KEY}`);
 
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
+  // Resolve the active model: activeModel overrides defaultModel overrides legacy localModel
+  const effectiveModel =
+    group.containerConfig?.activeModel ??
+    group.containerConfig?.defaultModel ??
+    group.containerConfig?.localModel;
+
+  if (effectiveModel && !effectiveModel.startsWith('claude-')) {
+    // Local model: route through the local proxy (vLLM).
+    // The proxy converts Anthropic → OpenAI Chat Completions format.
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${LOCAL_PROXY_PORT}`,
+    );
+    // SDK requires a non-empty placeholder; local proxy strips it before forwarding.
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    // Expose the credential proxy so agent-runner can reach Claude Haiku for query classification.
+    args.push('-e', `CREDENTIAL_PROXY_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`);
+    // Per-group tool allowlist — overrides classification in the agent-runner.
+    const groupTools = group.containerConfig?.localTools?.join(',') ?? '';
+    if (groupTools) args.push('-e', `GROUP_LOCAL_TOOLS=${groupTools}`);
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    // Claude model (or no override): route through the credential proxy.
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
+
+    // Mirror the host's auth method with a placeholder value.
+    // API key mode: SDK sends x-api-key, proxy replaces with real key.
+    // OAuth mode:   SDK exchanges placeholder token for temp API key,
+    //               proxy injects real OAuth token on that exchange request.
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -282,7 +311,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(group, mounts, containerName);
 
   logger.debug(
     {

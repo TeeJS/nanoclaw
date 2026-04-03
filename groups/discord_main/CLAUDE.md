@@ -63,6 +63,49 @@ headers = {'Authorization': f'Bearer {cfg["token"]}', 'Content-Type': 'applicati
 # e.g. requests.post(f'{cfg["url"]}/api/services/automation/trigger', headers=headers, json={'entity_id': 'automation.xyz'})
 ```
 
+# Music Assistant
+
+Use the `mcp__music__*` tools to control music playback via Music Assistant.
+
+**Keyword routing:**
+- **"play [title/artist]"** → use Music Assistant
+
+# Plex
+
+Use the `mcp__plex__*` tools to interact with the Plex media server. You can search media, manage libraries, control playback on clients, manage playlists and collections, view active sessions, and check server status.
+
+**Keyword routing:**
+- **"watch [title]"** → use Plex to find and play video content
+- **"play [title/artist]"** → use the music MCP (not Plex)
+
+# Freshservice
+
+Use the `mcp__freshservice__*` tools to look up IT tickets, changes, service requests, agents, and knowledge base articles. All tools are read-only by default.
+
+## Unassigned helpdesk check
+
+When asked anything like "is anything unassigned", "what's unassigned in the helpdesk", or "any unassigned tickets/tasks", run **both** of the following queries and combine the results:
+
+**Source 1 — Unassigned Tickets**
+Call `filter_tickets` with:
+```
+(status:2 OR status:3 OR status:6 OR status:7) AND (group_id:33000158516 OR group_id:33000158515) AND agent_id:null AND created_at:>'<1 months ago>'
+```
+
+**Source 2 — Unassigned Tasks**
+1. Call `filter_tickets` with: `status:2 AND created_at:>'<date 7 days ago>'` (all open tickets from the last 7 days, any agent/group)
+2. For each returned ticket, call `get_ticket_tasks` to fetch its tasks
+3. Show only tasks where ALL of the following are true:
+   - task `status` is 1 (open) or 2 (in progress)
+   - task `group_id` is 33000158516 OR 33000158515
+   - task is not deleted
+
+For each result (ticket or task), include the **title** and **requester name**.
+
+# Google Calendar
+
+Use the `gcal_list_calendars`, `gcal_list_events`, and `gcal_get_event` MCP tools to answer questions about TeeJ's calendar. Call `gcal_list_calendars` first to get calendar IDs when querying a specific calendar.
+
 # Backup Monitoring
 
 Script: `/workspace/group/monitor_backups.py`

@@ -32,6 +32,11 @@ export interface ContainerConfig {
   timeout?: number; // Default: 300000 (5 minutes)
   workspaceFolder?: string; // Override the group folder used for the workspace mount
   keepWarm?: boolean; // Keep container alive between requests (no idle timeout)
+  localModel?: string; // Legacy: use activeModel instead
+  localContextWindow?: number; // Token limit for local models (chars-based trim). Default: no trimming
+  activeModel?: string; // Currently active model. claude-* → Anthropic proxy; anything else → local proxy
+  defaultModel?: string; // Model to restore on /model reset. Null = SDK default (claude-sonnet-4-6)
+  localTools?: string[]; // Tool allowlist for local model groups. Overrides classification.
 }
 
 export interface RegisteredGroup {
@@ -42,6 +47,7 @@ export interface RegisteredGroup {
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  alwaysIsolated?: boolean; // If true, never reuse session — each run starts fresh
 }
 
 export interface NewMessage {

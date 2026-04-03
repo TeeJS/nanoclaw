@@ -12,6 +12,7 @@ export function extractSessionCommand(
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
+  if (/^\/model(\s+\S+)?$/.test(text)) return text;
   return null;
 }
 
@@ -45,6 +46,8 @@ export interface SessionCommandDeps {
   formatMessages: (msgs: NewMessage[], timezone: string) => string;
   /** Whether the denied sender would normally be allowed to interact (for denial messages). */
   canSenderInteract: (msg: NewMessage) => boolean;
+  /** Switch the group's active model. Returns a confirmation message. */
+  switchModel?: (modelArg: string | null) => Promise<string>;
 }
 
 function resultToText(result: string | object | null | undefined): string {
@@ -99,6 +102,15 @@ export async function handleSessionCommand(opts: {
 
   // AUTHORIZED: process pre-compact messages first, then run the command
   logger.info({ group: groupName, command }, 'Session command');
+
+  // Model switching — no agent run needed; handled entirely in the orchestrator
+  if (command.startsWith('/model') && deps.switchModel) {
+    const modelArg = command === '/model' ? null : command.slice(7).trim() || null;
+    const msg = await deps.switchModel(modelArg);
+    await deps.sendMessage(msg);
+    deps.advanceCursor(cmdMsg.timestamp);
+    return { handled: true, success: true };
+  }
 
   const cmdIndex = missedMessages.indexOf(cmdMsg);
   const preCompactMsgs = missedMessages.slice(0, cmdIndex);

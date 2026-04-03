@@ -1,52 +1,17 @@
 [
   {
-    "pattern": "sonos",
-    "reason": "Sonos/Cast Speaker reconnect noise \u2014 TeeJ requested ignore for rest of month",
-    "expires": "2026-03-31T23:59:59"
-  },
-  {
-    "pattern": "cast",
-    "reason": "Sonos/Cast Speaker reconnect noise \u2014 TeeJ requested ignore for rest of month",
-    "expires": "2026-03-31T23:59:59"
-  },
-  {
-    "pattern": "androidtv|android_tv",
-    "reason": "AndroidTV \u2014 TeeJ requested ignore until end of month",
-    "expires": "2026-03-31T23:59:59"
-  },
-  {
-    "pattern": "firmware issues with light transitions",
-    "reason": "Matter \u2014 4 TP-Link dimmer switch light endpoints with known firmware bug, harmless",
-    "expires": "2026-03-31T23:59:59"
-  },
-  {
     "pattern": "google_assistant",
-    "reason": "Google Assistant slow sync at startup \u2014 working fine, TeeJ requested permanent ignore",
+    "reason": "Google Assistant slow sync at startup — working fine, TeeJ requested permanent ignore",
     "expires": null
   },
   {
-    "pattern": "google_config",
-    "reason": "Google Cloud stream errors \u2014 TeeJ requested ignore until end of month",
-    "expires": "2026-03-31T23:59:59"
-  },
-  {
     "pattern": "bambu_lab",
-    "reason": "bambu_lab blocking scandir in async loop \u2014 known upstream bug, TeeJ requested 60 day ignore",
+    "reason": "bambu_lab blocking scandir in async loop — known upstream bug, TeeJ requested 60 day ignore",
     "expires": "2026-05-08T23:59:59"
   },
   {
-    "pattern": "livingroom-desk-voice",
-    "reason": "Living room desk voice ESPHome device — TeeJ requested ignore until end of month",
-    "expires": "2026-03-31T23:59:59"
-  },
-  {
-    "pattern": "livingroom-desk-tcs34725",
-    "reason": "Color sensor ESPHome device dropping — TeeJ requested ignore until end of month",
-    "expires": "2026-03-31T23:59:59"
-  },
-  {
     "pattern": "pyrate_limiter",
-    "reason": "O365/MS365 Teams rate limiter async warning \u2014 cosmetic, known upstream issue, permanent ignore",
+    "reason": "O365/MS365 Teams rate limiter async warning — cosmetic, known upstream issue, permanent ignore",
     "expires": null
   },
   {
@@ -55,13 +20,38 @@
     "expires": null
   },
   {
-    "pattern": "livingroom-desk-display.*(offline|can't connect|cannot connect)",
-    "reason": "Living room desk display ESPHome offline/connection messages — permanent ignore, other errors still reported",
+    "pattern": "unclean restart",
+    "reason": "Unclean restart messages — TeeJ requested permanent ignore",
     "expires": null
   },
   {
-    "pattern": "unclean restart",
-    "reason": "Unclean restart messages — TeeJ requested permanent ignore",
+    "pattern": "unclean shutdown",
+    "reason": "Unclean DB shutdown messages — TeeJ requested permanent ignore",
+    "expires": null
+  },
+  {
+    "pattern": "restart|reboot",
+    "reason": "All restart/reboot messages — suppress noise, but hourly check must still alert if HA is down and has not recovered",
+    "expires": "2026-06-28T23:59:59"
+  },
+  {
+    "pattern": "front_door_storage_used_percent",
+    "reason": "Front door storage used percent sensor — TeeJ requested permanent ignore",
+    "expires": null
+  },
+  {
+    "pattern": "frigate.*api.*timeout|frigate.*timeout.*api",
+    "reason": "Frigate API timeout — TeeJ requested 6 month ignore",
+    "expires": "2026-09-24T23:59:59"
+  },
+  {
+    "pattern": "192\\.168\\.2\\.108",
+    "reason": "192.168.2.108 brief outages — ignore unless same error appears in 2+ consecutive hourly checks (outage > 1 hour), permanent",
+    "expires": null
+  },
+  {
+    "pattern": "missing scene.*before tv",
+    "reason": "Missing 'before TV' scene — TeeJ requested permanent ignore",
     "expires": null
   }
 ]

@@ -6,6 +6,7 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  ContainerConfig,
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
@@ -524,6 +525,19 @@ export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
     'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
   ).run(groupFolder, sessionId);
+}
+
+export function deleteGroupSession(groupFolder: string): void {
+  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+}
+
+export function updateGroupContainerConfig(
+  jid: string,
+  config: ContainerConfig | undefined,
+): void {
+  db.prepare(
+    'UPDATE registered_groups SET container_config = ? WHERE jid = ?',
+  ).run(config ? JSON.stringify(config) : null, jid);
 }
 
 export function getAllSessions(): Record<string, string> {

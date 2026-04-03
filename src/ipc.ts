@@ -23,6 +23,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+  onToolUsage?: (groupFolder: string, toolName: string, timestamp: string) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -74,7 +75,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              if (data.type === 'tool_usage' && data.toolName) {
+                deps.onToolUsage?.(sourceGroup, data.toolName as string, data.timestamp as string ?? new Date().toISOString());
+              } else if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (

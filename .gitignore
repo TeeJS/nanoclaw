@@ -16,6 +16,8 @@ groups/*/*
 !groups/*/CLAUDE.md
 !groups/discord_main/monitor_backups.py
 !groups/ha_monitor/ignore_list.json
+!groups/meetings/diarize-transcribe.py
+!groups/meetings/wyoming-transcribe.py
 
 # Explicitly block group credentials
 groups/*/ha_config.json
@@ -27,6 +29,8 @@ groups/*/*.keys.json
 
 # Temp files
 .tmp-*
+*.bak
+*.20*
 
 # OS
 .DS_Store
@@ -39,3 +43,12 @@ groups/*/*.keys.json
 .nanoclaw/
 
 agents-sdk-docs
+
+# npm artifacts
+husky
+nanoclaw.log
+nanoclaw@*
+[0-9]*.[0-9]*.[0-9]*
+
+# Claude
+.claude/napkin.md

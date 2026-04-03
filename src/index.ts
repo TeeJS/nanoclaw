@@ -3,13 +3,17 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  AVAILABLE_CLAUDE_MODELS,
   CREDENTIAL_PROXY_PORT,
+  LOCAL_PROXY_PORT,
+  LOCAL_PROXY_UPSTREAM,
+  LOCAL_TOOLS,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import { startCredentialProxy } from './credential-proxy.js';
+import { startCredentialProxy, startLocalProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -27,6 +31,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteGroupSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -41,6 +46,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  updateGroupContainerConfig,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -199,6 +205,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
         );
       },
+      switchModel: (modelArg) => handleModelCommand(chatJid, group, modelArg),
     },
   });
   if (cmdResult.handled) return cmdResult.success;
@@ -364,9 +371,14 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (output.newSessionId && output.result !== null && output.status !== 'error') {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    } else if (output.result === null || output.status === 'error') {
+      // Don't save a session that produced no output — it may be corrupt.
+      // Clear it so the next run starts fresh.
+      delete sessions[group.folder];
+      deleteGroupSession(group.folder);
     }
 
     if (output.status === 'error') {
@@ -382,6 +394,85 @@ async function runAgent(
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   }
+}
+
+async function handleModelCommand(
+  chatJid: string,
+  group: RegisteredGroup,
+  modelArg: string | null,
+): Promise<string> {
+  const cfg = group.containerConfig ?? {};
+  const currentModel =
+    cfg.activeModel ?? cfg.defaultModel ?? cfg.localModel ?? null;
+
+  // List available models
+  if (modelArg === null) {
+    const lines = ['Available models:'];
+    for (const m of AVAILABLE_CLAUDE_MODELS) {
+      lines.push(`  ${m}${m === currentModel ? ' \u2190 current' : ''}`);
+    }
+    if (cfg.localModel) {
+      lines.push(
+        `  ${cfg.localModel} (local)${cfg.localModel === currentModel ? ' \u2190 current' : ''}`,
+      );
+    }
+    if (!currentModel) lines.push('\nNo model set — using SDK default.');
+    else if (!cfg.activeModel) lines.push(`\nCurrent: ${currentModel}`);
+    else lines.push(`\nActive: ${cfg.activeModel}${cfg.defaultModel ? `\nDefault: ${cfg.defaultModel}` : ''}`);
+    return lines.join('\n');
+  }
+
+  // Reset to default (clears activeModel override)
+  if (modelArg === 'reset') {
+    const resetTarget = cfg.defaultModel ?? cfg.localModel ?? 'claude-sonnet-4-6 (SDK default)';
+    if (!cfg.activeModel) {
+      return `Already on default (${resetTarget}).`;
+    }
+    const wasLocal = !cfg.activeModel.startsWith('claude-');
+    const willBeLocal = (cfg.defaultModel ?? cfg.localModel ?? '').startsWith('claude-') === false
+      && !!(cfg.defaultModel ?? cfg.localModel);
+    const { activeModel: _, ...rest } = cfg;
+    const newConfig = rest;
+    group.containerConfig = newConfig;
+    registeredGroups[chatJid] = group;
+    updateGroupContainerConfig(chatJid, newConfig);
+    queue.closeStdin(chatJid);
+    const crossesBoundary = wasLocal !== willBeLocal;
+    if (crossesBoundary) {
+      delete sessions[group.folder];
+      deleteGroupSession(group.folder);
+      return `Reset to default: ${resetTarget}. Session cleared (model type changed).`;
+    }
+    return `Reset to default: ${resetTarget}. Session preserved.`;
+  }
+
+  // Switch to a specific model
+  const isClaudeModel = modelArg.startsWith('claude-');
+  if (isClaudeModel && !AVAILABLE_CLAUDE_MODELS.includes(modelArg)) {
+    return `Unknown model: ${modelArg}\nAvailable Claude models: ${AVAILABLE_CLAUDE_MODELS.join(', ')}`;
+  }
+  if (!isClaudeModel && !LOCAL_PROXY_UPSTREAM) {
+    return 'Local model proxy not configured (LOCAL_PROXY_UPSTREAM not set).';
+  }
+  if (modelArg === currentModel) {
+    return `Already using ${modelArg}.`;
+  }
+
+  const newConfig = { ...cfg, activeModel: modelArg };
+  group.containerConfig = newConfig;
+  registeredGroups[chatJid] = group;
+  updateGroupContainerConfig(chatJid, newConfig);
+  queue.closeStdin(chatJid);
+
+  // Only clear session when crossing the Claude↔local boundary.
+  // Switching between two Claude models preserves session history.
+  const currentIsLocal = currentModel ? !currentModel.startsWith('claude-') : false;
+  if (currentIsLocal !== !isClaudeModel) {
+    delete sessions[group.folder];
+    deleteGroupSession(group.folder);
+    return `Switched to ${modelArg}. Session cleared (model type changed).`;
+  }
+  return `Switched to ${modelArg}. Session preserved.`;
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -542,10 +633,30 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start local model proxy whenever a vLLM upstream is configured.
+  // Started eagerly so model switching can route to it at any time.
+  let localProxyServer: import('http').Server | null = null;
+  if (LOCAL_PROXY_UPSTREAM) {
+    const localModelGroup = Object.values(registeredGroups).find(
+      (g) => g.containerConfig?.localModel,
+    );
+    const modelName = localModelGroup?.containerConfig?.localModel ?? 'local';
+    const contextWindow = localModelGroup?.containerConfig?.localContextWindow;
+    localProxyServer = await startLocalProxy(
+      LOCAL_PROXY_PORT,
+      LOCAL_PROXY_UPSTREAM,
+      modelName,
+      PROXY_BIND_HOST,
+      contextWindow,
+      LOCAL_TOOLS.length > 0 ? LOCAL_TOOLS : undefined,
+    );
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    localProxyServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -640,6 +751,34 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    onToolUsage: (groupFolder, toolName, timestamp) => {
+      // Find the group to get its display name for the log filename
+      const group = Object.values(registeredGroups).find((g) => g.folder === groupFolder);
+      if (!group) return;
+      // Extract channel name: after '#' in display name, else strip common prefixes from folder
+      const displayName = group.name || group.folder;
+      const hashIdx = displayName.lastIndexOf('#');
+      const channelName = hashIdx >= 0
+        ? displayName.slice(hashIdx + 1).trim().toLowerCase().replace(/\s+/g, '-')
+        : group.folder.replace(/^(discord|whatsapp|telegram|slack)_/, '').replace(/_/g, '-');
+      // Parse MCP source from tool name (mcp__{server}__tool → server, else 'sdk')
+      const mcpMatch = toolName.match(/^mcp__(\w+)__/);
+      const source = mcpMatch ? mcpMatch[1] : 'sdk';
+      const toolShortName = mcpMatch ? toolName.replace(/^mcp__\w+__/, '') : toolName;
+      // Format timestamp as YYYY-MM-DD HH:MM
+      const ts = new Date(timestamp);
+      const dateStr = `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')}`;
+      const timeStr = `${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}`;
+      const logLine = `| ${dateStr} ${timeStr} | ${toolShortName} | ${source} |\n`;
+      const logPath = `/mnt/nas/skybox/logs/${channelName}.md`;
+      try {
+        if (!fs.existsSync(logPath)) {
+          fs.mkdirSync('/mnt/nas/skybox/logs', { recursive: true });
+          fs.writeFileSync(logPath, `# Tool Usage — ${channelName}\n\n| Date/Time | Tool | Source |\n|-----------|------|--------|\n`);
+        }
+        fs.appendFileSync(logPath, logLine);
+      } catch { /* NAS unavailable, skip */ }
+    },
     onTasksChanged: () => {
       const tasks = getAllTasks();
       const taskRows = tasks.map((t) => ({

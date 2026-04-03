@@ -54,6 +54,7 @@ export class HaBridgeChannel implements Channel {
 
   private server: http.Server | null = null;
   private opts: ChannelOpts;
+  private groupContext: string | null = null;
 
   /**
    * At most one HA query is in-flight through the agent at a time.
@@ -76,6 +77,7 @@ export class HaBridgeChannel implements Channel {
   async connect(): Promise<void> {
     this.ensureGroupFolder();
     this.ensureGroupRegistered();
+    this.loadGroupContext();
 
     this.server = http.createServer((req, res) => this.handleRequest(req, res));
 
@@ -219,6 +221,14 @@ export class HaBridgeChannel implements Channel {
       { jid: HA_JID, folder: HA_GROUP_FOLDER },
       'HA Bridge: group registered',
     );
+  }
+
+  private loadGroupContext(): void {
+    const claudeMd = path.join(GROUPS_DIR, HA_GROUP_FOLDER, 'CLAUDE.md');
+    if (fs.existsSync(claudeMd)) {
+      this.groupContext = fs.readFileSync(claudeMd, 'utf-8');
+      logger.info({ claudeMd }, 'HA Bridge: loaded group context');
+    }
   }
 
   // ── HTTP request handling ──────────────────────────────────────────────────
@@ -469,12 +479,19 @@ export class HaBridgeChannel implements Channel {
         'HA Bridge: injecting message into NanoClaw pipeline',
       );
 
+      // Prepend group-specific CLAUDE.md so voice behavior instructions reach the
+      // agent. The container mounts discord_main as /workspace/group (to share
+      // HA config, NAS, etc.), so groups/ha_bridge/CLAUDE.md is never auto-loaded.
+      const content = this.groupContext
+        ? `${this.groupContext}\n\n---\n\n${text}`
+        : text;
+
       this.opts.onMessage(HA_JID, {
         id: msgId,
         chat_jid: HA_JID,
         sender: 'home-assistant',
         sender_name: 'Home Assistant',
-        content: text, // requiresTrigger=false, so no @Doof prefix needed
+        content, // requiresTrigger=false, so no @Doof prefix needed
         timestamp,
         is_from_me: false,
         is_bot_message: false,
