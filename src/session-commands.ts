@@ -12,7 +12,7 @@ export function extractSessionCommand(
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
-  if (/^\/model(\s+\S+)?$/.test(text)) return text;
+  if (/^\/model(\s+\S+(\s+\S+)?)?$/.test(text)) return text;
   return null;
 }
 
@@ -105,7 +105,8 @@ export async function handleSessionCommand(opts: {
 
   // Model switching — no agent run needed; handled entirely in the orchestrator
   if (command.startsWith('/model') && deps.switchModel) {
-    const modelArg = command === '/model' ? null : command.slice(7).trim() || null;
+    const modelArg =
+      command === '/model' ? null : command.slice(7).trim() || null;
     const msg = await deps.switchModel(modelArg);
     await deps.sendMessage(msg);
     deps.advanceCursor(cmdMsg.timestamp);
