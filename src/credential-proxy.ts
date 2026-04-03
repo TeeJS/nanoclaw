@@ -416,9 +416,7 @@ export function startLocalProxy(
           ...(ollamaTools ? { tools: ollamaTools } : {}),
           ...(forceToolUse ? { tool_choice: 'required' } : {}),
           options: {
-            ...(contextWindow
-              ? { num_ctx: contextWindow, num_predict: maxTokens }
-              : { num_predict: maxTokens }),
+            num_predict: maxTokens,
             ...(anthropic.temperature !== undefined
               ? { temperature: anthropic.temperature as number }
               : {}),
