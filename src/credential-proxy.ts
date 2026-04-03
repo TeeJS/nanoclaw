@@ -58,7 +58,9 @@ export function startCredentialProxy(
             const parsed = JSON.parse(body.toString());
             parsed.model = modelOverride;
             body = Buffer.from(JSON.stringify(parsed));
-          } catch { /* not JSON, forward as-is */ }
+          } catch {
+            /* not JSON, forward as-is */
+          }
         }
 
         const headers: Record<string, string | number | string[] | undefined> =
@@ -164,18 +166,28 @@ export function startLocalProxy(
     content?: unknown;
   };
   type AnthropicMsg = { role: string; content: string | ContentBlock[] };
-  type AnthropicTool = { name: string; description?: string; input_schema: unknown };
-  // OllamaToolCall — used for outgoing messages sent TO Ollama (arguments as object)
-  type OllamaToolCall = { function: { name: string; arguments: Record<string, unknown> } };
-  // AccumulatedToolCall — used when reading FROM Ollama streaming (arguments as concatenated string)
+  type AnthropicTool = {
+    name: string;
+    description?: string;
+    input_schema: unknown;
+  };
+  // LMToolCall — used for outgoing messages sent TO the local model (arguments as object)
+  type LMToolCall = {
+    function: { name: string; arguments: Record<string, unknown> };
+  };
+  // AccumulatedToolCall — used when reading FROM the local model streaming (arguments as concatenated string)
   type AccumulatedToolCall = {
     id?: string;
     type?: string;
     function?: { name?: string; arguments?: string };
   };
-  type OllamaMsg =
-    | { role: 'system' | 'user' | 'assistant'; content: string | null; tool_calls?: OllamaToolCall[] }
-    | { role: 'tool'; content: string };
+  type LMMsg =
+    | {
+        role: 'system' | 'user' | 'assistant';
+        content: string | null;
+        tool_calls?: LMToolCall[];
+      }
+    | { role: 'tool'; content: string; tool_call_id?: string };
 
   // Merge incoming streaming tool call fragments into an accumulator array by index.
   // Ollama may stream tool call arguments as partial JSON strings across multiple chunks.
@@ -188,9 +200,14 @@ export function startLocalProxy(
       const src = incoming[i] as {
         id?: string;
         type?: string;
-        function?: { name?: string; arguments?: string | Record<string, unknown> };
+        function?: {
+          name?: string;
+          arguments?: string | Record<string, unknown>;
+        };
       };
-      const argsToStr = (a: string | Record<string, unknown> | undefined): string => {
+      const argsToStr = (
+        a: string | Record<string, unknown> | undefined,
+      ): string => {
         if (a === undefined) return '';
         return typeof a === 'string' ? a : JSON.stringify(a);
       };
@@ -198,7 +215,10 @@ export function startLocalProxy(
         acc[i] = {
           id: src.id,
           type: src.type,
-          function: { name: src.function?.name, arguments: argsToStr(src.function?.arguments) },
+          function: {
+            name: src.function?.name,
+            arguments: argsToStr(src.function?.arguments),
+          },
         };
         continue;
       }
@@ -208,7 +228,8 @@ export function startLocalProxy(
       if (!dst.function) dst.function = {};
       if (src.function?.name) dst.function.name = src.function.name;
       if (src.function?.arguments !== undefined) {
-        dst.function.arguments = (dst.function.arguments ?? '') + argsToStr(src.function.arguments);
+        dst.function.arguments =
+          (dst.function.arguments ?? '') + argsToStr(src.function.arguments);
       }
     }
   }
@@ -235,33 +256,49 @@ export function startLocalProxy(
   function translateToolDefs(tools: AnthropicTool[]): unknown[] {
     return tools.map((t) => ({
       type: 'function',
-      function: { name: t.name, description: t.description ?? '', parameters: t.input_schema },
+      function: {
+        name: t.name,
+        description: t.description ?? '',
+        parameters: t.input_schema,
+      },
     }));
   }
 
-  // Translate Anthropic message history → Ollama native /api/chat messages
-  // Ollama native: no tool_call_id on tool results, arguments as object not string
-  function translateMessages(msgs: AnthropicMsg[]): OllamaMsg[] {
-    const out: OllamaMsg[] = [];
+  // Translate Anthropic message history → OpenAI-compatible messages
+  function translateMessages(msgs: AnthropicMsg[]): LMMsg[] {
+    const out: LMMsg[] = [];
     for (const msg of msgs) {
       const content = msg.content;
       if (msg.role === 'assistant') {
         if (Array.isArray(content)) {
           const textBlocks = content.filter((b) => b.type === 'text');
           const toolUseBlocks = content.filter((b) => b.type === 'tool_use');
-          const textContent = textBlocks.map((b) => b.text ?? '').join('\n').trim() || null;
-          const ollamaMsg: OllamaMsg = { role: 'assistant', content: textContent };
+          const textContent =
+            textBlocks
+              .map((b) => b.text ?? '')
+              .join('\n')
+              .trim() || null;
+          const ollamaMsg: LMMsg = {
+            role: 'assistant',
+            content: textContent,
+          };
           if (toolUseBlocks.length > 0) {
-            (ollamaMsg as { role: 'assistant'; content: string | null; tool_calls?: OllamaToolCall[] }).tool_calls =
-              toolUseBlocks.map((b) => ({
-                type: 'function' as const,
-                function: {
-                  name: b.name ?? '',
-                  arguments: typeof b.input === 'string'
+            (
+              ollamaMsg as {
+                role: 'assistant';
+                content: string | null;
+                tool_calls?: LMToolCall[];
+              }
+            ).tool_calls = toolUseBlocks.map((b) => ({
+              type: 'function' as const,
+              function: {
+                name: b.name ?? '',
+                arguments:
+                  typeof b.input === 'string'
                     ? (JSON.parse(b.input) as Record<string, unknown>)
-                    : (b.input ?? {}) as Record<string, unknown>,
-                },
-              }));
+                    : ((b.input ?? {}) as Record<string, unknown>),
+              },
+            }));
           }
           out.push(ollamaMsg);
         } else {
@@ -273,11 +310,14 @@ export function startLocalProxy(
         if (Array.isArray(content)) {
           const toolResults = content.filter((b) => b.type === 'tool_result');
           const otherBlocks = content.filter((b) => b.type !== 'tool_result');
-          // Ollama native tool results: role:'tool', no ID needed
           for (const tr of toolResults) {
             out.push({
               role: 'tool',
-              content: typeof tr.content === 'string' ? tr.content : extractText(tr.content),
+              tool_call_id: tr.tool_use_id ?? `toolu_${Date.now()}`,
+              content:
+                typeof tr.content === 'string'
+                  ? tr.content
+                  : extractText(tr.content),
             });
           }
           const text = extractText(otherBlocks);
@@ -313,50 +353,59 @@ export function startLocalProxy(
         }
 
         // Build system string — trim to fit context window.
-        const maxSystemChars = contextWindow ? Math.floor(contextWindow * 0.75) : Infinity;
+        const maxSystemChars = contextWindow
+          ? Math.floor(contextWindow * 0.75)
+          : Infinity;
         let systemText = extractText(anthropic.system ?? '');
-        if (isFinite(maxSystemChars)) systemText = trimTail(systemText, maxSystemChars);
+        if (isFinite(maxSystemChars))
+          systemText = trimTail(systemText, maxSystemChars);
 
-        // Build Ollama native messages from Anthropic history
-        const ollamaMessages: OllamaMsg[] = [];
-        if (systemText) ollamaMessages.push({ role: 'system', content: systemText });
-        ollamaMessages.push(...translateMessages((anthropic.messages as AnthropicMsg[]) ?? []));
+        // Build OpenAI-compatible messages from Anthropic history
+        const ollamaMessages: LMMsg[] = [];
+        if (systemText)
+          ollamaMessages.push({ role: 'system', content: systemText });
+        ollamaMessages.push(
+          ...translateMessages((anthropic.messages as AnthropicMsg[]) ?? []),
+        );
 
         // Tools are pre-filtered by the agent-runner's dynamic classifier — pass them through as-is.
         // Cap tools for local models — large tool lists cause huge prompts and format errors.
         const allTools = (anthropic.tools as AnthropicTool[] | undefined) ?? [];
-        const anthropicTools = allowedTools && allowedTools.length > 0
-          ? allTools.filter((t) => allowedTools.includes(t.name))
-          : allTools.slice(0, 3);
-        const ollamaTools = anthropicTools.length > 0 ? translateToolDefs(anthropicTools) : undefined;
+        const anthropicTools =
+          allowedTools && allowedTools.length > 0
+            ? allTools.filter((t) => allowedTools.includes(t.name))
+            : allTools.slice(0, 3);
+        const ollamaTools =
+          anthropicTools.length > 0
+            ? translateToolDefs(anthropicTools)
+            : undefined;
 
-        // With think:false on native Ollama, model outputs reasoning as content before tool calls.
-        // Cap at 2048 tokens — enough to reason through to a tool call (~1200 tokens in practice)
-        // but not so much that the model rambles indefinitely without acting.
-        const maxTokens = contextWindow
-          ? Math.min((anthropic.max_tokens as number) ?? 256, 2048)
-          : Math.min((anthropic.max_tokens as number) ?? 256, 2048);
+        // Cap output tokens at contextWindow/8 to leave room for input + thinking.
+        // Falls back to 2048 if no context window configured.
+        const maxTokensCap = contextWindow ? Math.floor(contextWindow / 8) : 2048;
+        const maxTokens = Math.min(
+          (anthropic.max_tokens as number) ?? 256,
+          maxTokensCap,
+        );
 
-        const isStream = !!(anthropic.stream);
+        const isStream = !!anthropic.stream;
         // Force tool use on the first tool-eligible turn only. Without this, qwen3 reasons
         // endlessly and stops with end_turn without calling anything.
         // After a tool result the model is free to answer or call more tools (auto).
         const hasToolResult = ollamaMessages.some((m) => m.role === 'tool');
         const forceToolUse = !!(ollamaTools && !hasToolResult);
 
-        // Use native Ollama /api/chat endpoint — /v1/chat/completions ignores think:false
-        // and leaks thinking tokens into content, making responses empty or garbled.
+        // Use OpenAI-compatible /v1/chat/completions endpoint (llama-cpp)
         const ollamaBody = JSON.stringify({
           model: modelName,
           messages: ollamaMessages,
           stream: isStream,
-          think: false,
+          max_tokens: maxTokens,
           ...(ollamaTools ? { tools: ollamaTools } : {}),
           ...(forceToolUse ? { tool_choice: 'required' } : {}),
-          options: {
-            ...(contextWindow ? { num_ctx: contextWindow, num_predict: maxTokens } : { num_predict: maxTokens }),
-            ...(anthropic.temperature !== undefined ? { temperature: anthropic.temperature as number } : {}),
-          },
+          ...(anthropic.temperature !== undefined
+            ? { temperature: anthropic.temperature as number }
+            : {}),
         });
 
         logger.info(
@@ -367,14 +416,14 @@ export function startLocalProxy(
             maxTokens,
             stream: isStream,
           },
-          'Local proxy forwarding to Ollama',
+          'Local proxy forwarding to llama-cpp',
         );
 
         const upReq = makeRequest(
           {
             hostname: upstream.hostname,
             port: upstream.port || (isHttps ? 443 : 80),
-            path: '/api/chat',
+            path: '/v1/chat/completions',
             method: 'POST',
             headers: {
               'content-type': 'application/json',
@@ -399,9 +448,13 @@ export function startLocalProxy(
               send('message_start', {
                 type: 'message_start',
                 message: {
-                  id: msgId, type: 'message', role: 'assistant',
-                  content: [], model: modelName,
-                  stop_reason: null, stop_sequence: null,
+                  id: msgId,
+                  type: 'message',
+                  role: 'assistant',
+                  content: [],
+                  model: modelName,
+                  stop_reason: null,
+                  stop_sequence: null,
                   usage: { input_tokens: 0, output_tokens: 1 },
                 },
               });
@@ -421,35 +474,91 @@ export function startLocalProxy(
               let contentBuf = '';
               const stripThinking = (text: string): string => {
                 const idx = text.lastIndexOf('</think>');
-                return idx >= 0 ? text.slice(idx + 8).trim() : text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                return idx >= 0
+                  ? text.slice(idx + 8).trim()
+                  : text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
               };
 
               // Shared helper: emit accumulated content/tools and close the stream
               const flushAndClose = (doneReason?: string) => {
                 if (streamFinished || res.writableEnded) return;
                 streamFinished = true;
-                logger.info({ doneReason, hasToolCalls: accToolCalls.length > 0, contentLen: contentBuf.length }, 'Local proxy: stream done');
-                const cleanText = accToolCalls.length > 0 ? '' : stripThinking(contentBuf);
+                logger.info(
+                  {
+                    doneReason,
+                    hasToolCalls: accToolCalls.length > 0,
+                    contentLen: contentBuf.length,
+                  },
+                  'Local proxy: stream done',
+                );
+                const cleanText =
+                  accToolCalls.length > 0 ? '' : stripThinking(contentBuf);
                 if (cleanText) {
                   const textIdx = nextBlockIndex++;
-                  send('content_block_start', { type: 'content_block_start', index: textIdx, content_block: { type: 'text', text: '' } });
-                  send('content_block_delta', { type: 'content_block_delta', index: textIdx, delta: { type: 'text_delta', text: cleanText } });
-                  send('content_block_stop', { type: 'content_block_stop', index: textIdx });
+                  send('content_block_start', {
+                    type: 'content_block_start',
+                    index: textIdx,
+                    content_block: { type: 'text', text: '' },
+                  });
+                  send('content_block_delta', {
+                    type: 'content_block_delta',
+                    index: textIdx,
+                    delta: { type: 'text_delta', text: cleanText },
+                  });
+                  send('content_block_stop', {
+                    type: 'content_block_stop',
+                    index: textIdx,
+                  });
                 }
                 const hasToolCalls = accToolCalls.length > 0;
                 if (hasToolCalls) {
-                  logger.info({ toolCalls: accToolCalls.map((tc) => ({ name: tc.function?.name, args: (tc.function?.arguments ?? '').slice(0, 200) })) }, 'Local proxy: tool calls from model');
+                  logger.info(
+                    {
+                      toolCalls: accToolCalls.map((tc) => ({
+                        name: tc.function?.name,
+                        args: (tc.function?.arguments ?? '').slice(0, 200),
+                      })),
+                    },
+                    'Local proxy: tool calls from model',
+                  );
                   for (const tc of accToolCalls) {
                     const blockIdx = nextBlockIndex++;
                     const toolId = tc.id ?? `toolu_${Date.now()}_${blockIdx}`;
                     const rawArgs = tc.function?.arguments ?? '';
-                    send('content_block_start', { type: 'content_block_start', index: blockIdx, content_block: { type: 'tool_use', id: toolId, name: tc.function?.name ?? 'unknown', input: {} } });
-                    send('content_block_delta', { type: 'content_block_delta', index: blockIdx, delta: { type: 'input_json_delta', partial_json: rawArgs } });
-                    send('content_block_stop', { type: 'content_block_stop', index: blockIdx });
+                    send('content_block_start', {
+                      type: 'content_block_start',
+                      index: blockIdx,
+                      content_block: {
+                        type: 'tool_use',
+                        id: toolId,
+                        name: tc.function?.name ?? 'unknown',
+                        input: {},
+                      },
+                    });
+                    send('content_block_delta', {
+                      type: 'content_block_delta',
+                      index: blockIdx,
+                      delta: {
+                        type: 'input_json_delta',
+                        partial_json: rawArgs,
+                      },
+                    });
+                    send('content_block_stop', {
+                      type: 'content_block_stop',
+                      index: blockIdx,
+                    });
                   }
                 }
-                const stopReason = hasToolCalls ? 'tool_use' : doneReason === 'length' ? 'max_tokens' : 'end_turn';
-                send('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: outTokens } });
+                const stopReason = hasToolCalls
+                  ? 'tool_use'
+                  : doneReason === 'length'
+                    ? 'max_tokens'
+                    : 'end_turn';
+                send('message_delta', {
+                  type: 'message_delta',
+                  delta: { stop_reason: stopReason, stop_sequence: null },
+                  usage: { output_tokens: outTokens },
+                });
                 send('message_stop', { type: 'message_stop' });
                 res.end();
               };
@@ -464,83 +573,153 @@ export function startLocalProxy(
                     // Auto-detect format: OpenAI SSE (data: {...}) vs Ollama native NDJSON
                     if (line.startsWith('data: ')) {
                       const data = line.slice(6).trim();
-                      if (data === '[DONE]') { flushAndClose('stop'); continue; }
+                      if (data === '[DONE]') {
+                        flushAndClose('stop');
+                        continue;
+                      }
                       const chunk = JSON.parse(data) as {
                         choices?: Array<{
                           finish_reason?: string | null;
-                          delta?: { content?: string | null; reasoning_content?: string | null; tool_calls?: unknown[] };
+                          delta?: {
+                            content?: string | null;
+                            reasoning_content?: string | null;
+                            tool_calls?: unknown[];
+                          };
                         }>;
                       };
                       const choice = chunk.choices?.[0];
                       if (!choice) continue;
                       const delta = choice.delta;
-                      if (delta?.content) { contentBuf += delta.content; outTokens++; }
+                      if (delta?.content) {
+                        contentBuf += delta.content;
+                        outTokens++;
+                      }
                       // reasoning_content: skip (thinking tokens, not part of the answer)
-                      if (delta?.tool_calls && Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
+                      if (
+                        delta?.tool_calls &&
+                        Array.isArray(delta.tool_calls) &&
+                        delta.tool_calls.length > 0
+                      ) {
                         mergeToolCalls(accToolCalls, delta.tool_calls);
                       }
-                      if (choice.finish_reason != null) flushAndClose(choice.finish_reason);
+                      if (choice.finish_reason != null)
+                        flushAndClose(choice.finish_reason);
                     } else {
                       // Ollama native NDJSON
                       const ev = JSON.parse(line) as {
                         done?: boolean;
                         done_reason?: string;
-                        message?: { content?: string; thinking?: string; tool_calls?: unknown[] };
+                        message?: {
+                          content?: string;
+                          thinking?: string;
+                          tool_calls?: unknown[];
+                        };
                       };
                       const msg = ev.message;
                       if (!msg) continue;
-                      if (msg.content) { contentBuf += msg.content; outTokens++; }
-                      if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+                      if (msg.content) {
+                        contentBuf += msg.content;
+                        outTokens++;
+                      }
+                      if (
+                        msg.tool_calls &&
+                        Array.isArray(msg.tool_calls) &&
+                        msg.tool_calls.length > 0
+                      ) {
                         mergeToolCalls(accToolCalls, msg.tool_calls);
                       }
                       if (ev.done) flushAndClose(ev.done_reason);
                     }
-                  } catch { /* skip malformed */ }
+                  } catch {
+                    /* skip malformed */
+                  }
                 }
               });
 
-              upRes.on('end', () => { flushAndClose('end_turn'); });
+              upRes.on('end', () => {
+                flushAndClose('end_turn');
+              });
             } else {
               // Convert Ollama/OpenAI JSON response → Anthropic JSON response
               const rChunks: Buffer[] = [];
               upRes.on('data', (c: Buffer) => rChunks.push(c));
               upRes.on('end', () => {
                 try {
-                  const raw = JSON.parse(Buffer.concat(rChunks).toString()) as Record<string, unknown>;
+                  const raw = JSON.parse(
+                    Buffer.concat(rChunks).toString(),
+                  ) as Record<string, unknown>;
                   if (raw.error) {
                     res.writeHead(500, { 'content-type': 'application/json' });
-                    res.end(JSON.stringify({ error: { message: (raw.error as { message?: string })?.message ?? String(raw.error) } }));
+                    res.end(
+                      JSON.stringify({
+                        error: {
+                          message:
+                            (raw.error as { message?: string })?.message ??
+                            String(raw.error),
+                        },
+                      }),
+                    );
                     return;
                   }
                   // Detect OpenAI format (has choices array) vs Ollama native (has message)
-                  let message: { content?: string; thinking?: string; tool_calls?: OllamaToolCall[] } | undefined;
+                  let message:
+                    | {
+                        content?: string;
+                        thinking?: string;
+                        tool_calls?: LMToolCall[];
+                      }
+                    | undefined;
                   let doneReason: string;
                   if (Array.isArray(raw.choices)) {
-                    const choice = (raw.choices as Array<{ message?: { content?: string; tool_calls?: OllamaToolCall[] }; finish_reason?: string }>)[0];
+                    const choice = (
+                      raw.choices as Array<{
+                        message?: {
+                          content?: string;
+                          tool_calls?: LMToolCall[];
+                        };
+                        finish_reason?: string;
+                      }>
+                    )[0];
                     message = choice?.message;
                     doneReason = choice?.finish_reason ?? 'stop';
                   } else {
-                    const ollamaRes = raw as { message?: { content?: string; thinking?: string; tool_calls?: OllamaToolCall[] }; done_reason?: string };
+                    const ollamaRes = raw as {
+                      message?: {
+                        content?: string;
+                        thinking?: string;
+                        tool_calls?: LMToolCall[];
+                      };
+                      done_reason?: string;
+                    };
                     message = ollamaRes.message;
                     doneReason = ollamaRes.done_reason ?? 'stop';
                   }
 
-                  const hasNonStreamToolCalls = !!(message?.tool_calls?.length);
+                  const hasNonStreamToolCalls = !!message?.tool_calls?.length;
                   const rawText = message?.content ?? '';
                   const thinkIdx = rawText.lastIndexOf('</think>');
                   const cleanNonStreamText = hasNonStreamToolCalls
                     ? ''
-                    : (thinkIdx >= 0 ? rawText.slice(thinkIdx + 8).trim() : rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim());
+                    : thinkIdx >= 0
+                      ? rawText.slice(thinkIdx + 8).trim()
+                      : rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
                   const contentBlocks: unknown[] = [];
                   if (cleanNonStreamText) {
-                    contentBlocks.push({ type: 'text', text: cleanNonStreamText });
+                    contentBlocks.push({
+                      type: 'text',
+                      text: cleanNonStreamText,
+                    });
                   }
-                  if (message?.tool_calls && Array.isArray(message.tool_calls)) {
+                  if (
+                    message?.tool_calls &&
+                    Array.isArray(message.tool_calls)
+                  ) {
                     for (const tc of message.tool_calls) {
-                      const input = typeof tc.function.arguments === 'string'
-                        ? JSON.parse(tc.function.arguments) as unknown
-                        : tc.function.arguments ?? {};
+                      const input =
+                        typeof tc.function.arguments === 'string'
+                          ? (JSON.parse(tc.function.arguments) as unknown)
+                          : (tc.function.arguments ?? {});
                       contentBlocks.push({
                         type: 'tool_use',
                         id: `toolu_${Date.now()}_${contentBlocks.length}`,
@@ -549,11 +728,15 @@ export function startLocalProxy(
                       });
                     }
                   }
-                  if (contentBlocks.length === 0) contentBlocks.push({ type: 'text', text: '' });
+                  if (contentBlocks.length === 0)
+                    contentBlocks.push({ type: 'text', text: '' });
 
-                  const stopReason = doneReason === 'length' ? 'max_tokens'
-                    : (message?.tool_calls?.length ?? 0) > 0 ? 'tool_use'
-                    : 'end_turn';
+                  const stopReason =
+                    doneReason === 'length'
+                      ? 'max_tokens'
+                      : (message?.tool_calls?.length ?? 0) > 0
+                        ? 'tool_use'
+                        : 'end_turn';
 
                   const anthropicRes = {
                     id: `msg_${Date.now()}`,
@@ -564,15 +747,23 @@ export function startLocalProxy(
                     stop_reason: stopReason,
                     stop_sequence: null,
                     usage: {
-                      input_tokens: (raw.prompt_eval_count as number | undefined) ?? 0,
-                      output_tokens: (raw.eval_count as number | undefined) ?? 0,
+                      input_tokens:
+                        (raw.prompt_eval_count as number | undefined) ?? 0,
+                      output_tokens:
+                        (raw.eval_count as number | undefined) ?? 0,
                     },
                   };
                   const out = JSON.stringify(anthropicRes);
-                  res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(out) });
+                  res.writeHead(200, {
+                    'content-type': 'application/json',
+                    'content-length': Buffer.byteLength(out),
+                  });
                   res.end(out);
                 } catch (err) {
-                  logger.error({ err }, 'Local proxy: failed to parse Ollama response');
+                  logger.error(
+                    { err },
+                    'Local proxy: failed to parse response',
+                  );
                   res.writeHead(502);
                   res.end('Bad Gateway');
                 }
@@ -582,8 +773,11 @@ export function startLocalProxy(
         );
 
         upReq.on('error', (err) => {
-          logger.error({ err }, 'Local proxy: Ollama upstream error');
-          if (!res.headersSent) { res.writeHead(502); res.end('Bad Gateway'); }
+          logger.error({ err }, 'Local proxy: upstream error');
+          if (!res.headersSent) {
+            res.writeHead(502);
+            res.end('Bad Gateway');
+          }
         });
 
         upReq.write(ollamaBody);
@@ -592,7 +786,10 @@ export function startLocalProxy(
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, upstream: upstreamUrl, modelName, contextWindow }, 'Local model proxy started');
+      logger.info(
+        { port, host, upstream: upstreamUrl, modelName, contextWindow },
+        'Local model proxy started',
+      );
       resolve(server);
     });
 
