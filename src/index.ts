@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   AVAILABLE_CLAUDE_MODELS,
   CREDENTIAL_PROXY_PORT,
+  LOCAL_CONTEXT_WINDOWS,
   LOCAL_PROXY_PORT,
   LOCAL_PROXY_UPSTREAM,
   LOCAL_TOOLS,
@@ -422,7 +423,10 @@ async function handleModelCommand(
       );
     }
     if (!currentModel) lines.push('\nNo model set — using SDK default.');
-    else if (!cfg.activeModel) lines.push(`\nCurrent: ${currentModel}${cfg.defaultModel ? ' (default)' : ''}`);
+    else if (!cfg.activeModel)
+      lines.push(
+        `\nCurrent: ${currentModel}${cfg.defaultModel ? ' (default)' : ''}`,
+      );
     else
       lines.push(
         `\nActive: ${cfg.activeModel}\nDefault: ${cfg.defaultModel ?? cfg.localModel ?? 'claude-sonnet-4-6 (SDK)'}`,
@@ -674,9 +678,12 @@ async function main(): Promise<void> {
     });
     const localCfg = localModelGroup?.containerConfig;
     const modelName =
-      (localCfg?.activeModel ?? localCfg?.defaultModel ?? localCfg?.localModel) ??
+      localCfg?.activeModel ??
+      localCfg?.defaultModel ??
+      localCfg?.localModel ??
       'local';
-    const contextWindow = localCfg?.localContextWindow;
+    const contextWindow =
+      localCfg?.localContextWindow ?? LOCAL_CONTEXT_WINDOWS[modelName];
     localProxyServer = await startLocalProxy(
       LOCAL_PROXY_PORT,
       LOCAL_PROXY_UPSTREAM,
