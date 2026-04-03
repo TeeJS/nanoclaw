@@ -327,7 +327,6 @@ export function startLocalProxy(
           for (const tr of toolResults) {
             out.push({
               role: 'tool',
-              tool_call_id: tr.tool_use_id ?? `toolu_${Date.now()}`,
               content:
                 typeof tr.content === 'string'
                   ? tr.content
@@ -394,14 +393,10 @@ export function startLocalProxy(
             ? translateToolDefs(anthropicTools)
             : undefined;
 
-        // Cap output tokens at contextWindow/8 to leave room for input + thinking.
-        // Falls back to 2048 if no context window configured.
-        const maxTokensCap = contextWindow
-          ? Math.floor(contextWindow / 8)
-          : 2048;
+        // Cap at 2048 — enough for reasoning + tool calls without overrunning KV cache.
         const maxTokens = Math.min(
           (anthropic.max_tokens as number) ?? 256,
-          maxTokensCap,
+          2048,
         );
 
         const isStream = !!anthropic.stream;
@@ -411,17 +406,23 @@ export function startLocalProxy(
         const hasToolResult = ollamaMessages.some((m) => m.role === 'tool');
         const forceToolUse = !!(ollamaTools && !hasToolResult);
 
-        // Use OpenAI-compatible /v1/chat/completions endpoint (llama-cpp)
+        // Use Ollama /api/chat endpoint — /v1/chat/completions ignores think:false
+        // and leaks thinking tokens into content, making responses empty or garbled.
         const ollamaBody = JSON.stringify({
           model: modelName,
           messages: ollamaMessages,
           stream: isStream,
-          max_tokens: maxTokens,
+          think: false,
           ...(ollamaTools ? { tools: ollamaTools } : {}),
           ...(forceToolUse ? { tool_choice: 'required' } : {}),
-          ...(anthropic.temperature !== undefined
-            ? { temperature: anthropic.temperature as number }
-            : {}),
+          options: {
+            ...(contextWindow
+              ? { num_ctx: contextWindow, num_predict: maxTokens }
+              : { num_predict: maxTokens }),
+            ...(anthropic.temperature !== undefined
+              ? { temperature: anthropic.temperature as number }
+              : {}),
+          },
         });
 
         logger.info(
@@ -432,14 +433,14 @@ export function startLocalProxy(
             maxTokens,
             stream: isStream,
           },
-          'Local proxy forwarding to llama-cpp',
+          'Local proxy forwarding to Ollama/llama-cpp',
         );
 
         const upReq = makeRequest(
           {
             hostname: upstream.hostname,
             port: upstream.port || (isHttps ? 443 : 80),
-            path: '/v1/chat/completions',
+            path: '/api/chat',
             method: 'POST',
             headers: {
               'content-type': 'application/json',
