@@ -252,6 +252,16 @@ export function startLocalProxy(
     return s.length > maxChars ? s.slice(-maxChars) : s;
   }
 
+  // Strip <think>...</think> blocks from model output.
+  // GLM-4.7-Flash (and similar) emit reasoning inside <think> tags before the answer.
+  // Uses lastIndexOf so multiple think blocks are all stripped at once.
+  function stripThinking(text: string): string {
+    const idx = text.lastIndexOf('</think>');
+    return idx >= 0
+      ? text.slice(idx + 8).trim()
+      : text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  }
+
   // Translate Anthropic tool definitions → Ollama tools array (same schema as OpenAI)
   function translateToolDefs(tools: AnthropicTool[]): unknown[] {
     return tools.map((t) => ({
@@ -271,13 +281,17 @@ export function startLocalProxy(
       const content = msg.content;
       if (msg.role === 'assistant') {
         if (Array.isArray(content)) {
+          // thinking blocks (type === 'thinking') are excluded by the type filter —
+          // they are stripped in transmission and never sent to the local model.
           const textBlocks = content.filter((b) => b.type === 'text');
           const toolUseBlocks = content.filter((b) => b.type === 'tool_use');
           const textContent =
-            textBlocks
-              .map((b) => b.text ?? '')
-              .join('\n')
-              .trim() || null;
+            stripThinking(
+              textBlocks
+                .map((b) => b.text ?? '')
+                .join('\n')
+                .trim(),
+            ) || null;
           const ollamaMsg: LMMsg = {
             role: 'assistant',
             content: textContent,
@@ -302,7 +316,7 @@ export function startLocalProxy(
           }
           out.push(ollamaMsg);
         } else {
-          const text = extractText(content);
+          const text = stripThinking(extractText(content));
           if (text) out.push({ role: 'assistant', content: text });
         }
       } else {
@@ -382,7 +396,9 @@ export function startLocalProxy(
 
         // Cap output tokens at contextWindow/8 to leave room for input + thinking.
         // Falls back to 2048 if no context window configured.
-        const maxTokensCap = contextWindow ? Math.floor(contextWindow / 8) : 2048;
+        const maxTokensCap = contextWindow
+          ? Math.floor(contextWindow / 8)
+          : 2048;
         const maxTokens = Math.min(
           (anthropic.max_tokens as number) ?? 256,
           maxTokensCap,
@@ -467,17 +483,9 @@ export function startLocalProxy(
               // Accumulate tool calls with proper fragment merging — Ollama may stream
               // tool call arguments as partial JSON strings across multiple chunks.
               const accToolCalls: AccumulatedToolCall[] = [];
-              // Buffer all content — with think:false, reasoning leaks into content before tool calls.
-              // We suppress it when there are tool calls, and strip thinking for final answers.
-              // With think:false on Ollama native, model outputs reasoning without the opening <think>
-              // tag but DOES emit </think> before the actual answer. Strip everything up to </think>.
+              // Buffer all content — model may emit <think>...</think> reasoning before the answer.
+              // We suppress content when there are tool calls; strip thinking tags for final answers.
               let contentBuf = '';
-              const stripThinking = (text: string): string => {
-                const idx = text.lastIndexOf('</think>');
-                return idx >= 0
-                  ? text.slice(idx + 8).trim()
-                  : text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-              };
 
               // Shared helper: emit accumulated content/tools and close the stream
               const flushAndClose = (doneReason?: string) => {
